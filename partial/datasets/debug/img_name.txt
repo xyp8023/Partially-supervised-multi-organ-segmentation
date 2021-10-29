@@ -1,0 +1,2 @@
+/Midgard/home/yipingx/.local/Partially-supervised-multi-organ-segmentation/partial/datasets/images/1L_GH010353frame0001.png
+/Midgard/home/yipingx/.local/Partially-supervised-multi-organ-segmentation/partial/datasets/images/1L_GH010068frame0186.png

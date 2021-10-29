@@ -24,8 +24,8 @@ train_transforms = transforms.Compose([ transforms.RandomCrop(256),
 
 dataset = WeedCropDataset(root_dir="datasets/debug",transform=train_transforms)
 # dataset = WeedCropDataset(root_dir="datasets/val")
-
-dataloader = DataLoader(dataset, batch_size=2,
+N = 2 # batch_size
+dataloader = DataLoader(dataset, batch_size=N,
                         shuffle=True, num_workers=2)
 
 net = UNet(n_channels=3, n_classes=4, bilinear=True)
@@ -45,13 +45,17 @@ for epoch in range(num_epochs):
     for i_batch, sample_batched in enumerate(dataloader):
         source = sample_batched['img'].to(device=device, dtype=torch.float32) # (N,3,256,256)
         target = (sample_batched['label']*255).to(device=device, dtype=torch.uint8)# (N,3,256,256)
-        target_ = to_onehot.call(target).to(device=device,dtype=torch.long)
+        target_ = to_onehot.call(target).to(device=device,dtype=torch.long) # (N,256,256)
 
         optimizer.zero_grad()
         prediction = net(source) # # (N,4,256,256)
-        # print(target_)
+        # print(np.unique(target_.cpu().numpy()))
+        # print("\n")
+        # print(target_.shape)
+
         # print("\n")
         # print(prediction)
+        # assert 1==0
         # loss = criterion(prediction, target_) 
         loss =  criterion(prediction, target_)  + dice_loss(F.softmax(prediction, dim=1).float(),
                                        F.one_hot(target_, net.n_classes).permute(0, 3, 1, 2).float(),

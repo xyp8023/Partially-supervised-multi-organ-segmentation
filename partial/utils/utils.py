@@ -1,6 +1,26 @@
 import matplotlib.pyplot as plt
 import torch
 
+class ColorMap(object):
+    """
+    # label:color_rgb:parts:actions
+background:0,0,0::
+crop:102,255,102::
+soil:51,221,255::
+thistle:250,50,183::
+    """
+    def __init__(self):
+        self.classes = ["background", "crop", "soil", "thistle"]
+        self.colormap = [[0,0,0], [102,255,102], [51,221,255], [250,50,183]]
+        self.cm2lbl = np.zeros(256**3)
+        for i,cm in enumerate(self.colormap):
+            self.cm2lbl[(cm[0]*256+cm[1])*256+cm[2]]=i
+    def img2label(im):
+        data = im
+        index = (data[:,:,0]*256+data[:,:,1])*256+data[:,:,2]
+        return np.array(self.cm2lbl[idx])
+
+
 class To_Class(object):
     def __init__(self):
         self.background = [0,0,0] # [1,0,0,0]

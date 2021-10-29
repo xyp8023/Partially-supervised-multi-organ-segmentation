@@ -10,16 +10,19 @@ from utils.utils import To_Onehot, To_Class
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim
-
+import os
+import sys
 
 ## hyper-parameters
 learning_rate=0.002
 amp=False
+torch.manual_seed(17)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-train_transforms = transforms.Compose([ transforms.RandomCrop(256), 
-                                       transforms.ToTensor()]) 
+train_transforms = transforms.Compose([transforms.ToTensor()]) 
+# train_transforms = transforms.Compose([transforms.RandomCrop(512), transforms.ToTensor()]) 
+
 
 
 dataset = WeedCropDataset(root_dir="datasets/debug",transform=train_transforms)
@@ -35,56 +38,36 @@ optimizer = optim.RMSprop(net.parameters(), lr=learning_rate, weight_decay=1e-8,
 # grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
 criterion = nn.CrossEntropyLoss()
 
-# to_onehot = To_Onehot()
-to_onehot = To_Class()
 
 
-num_epochs = 40
+# model = TheModelClass(*args, **kwargs)
+# model.load_state_dict(torch.load(PATH))
+# model.eval()
+num_epochs = 200
 for epoch in range(num_epochs):
     epoch_loss = 0.0
     for i_batch, sample_batched in enumerate(dataloader):
         source = sample_batched['img'].to(device=device, dtype=torch.float32) # (N,3,256,256)
-        target = (sample_batched['label']*255).to(device=device, dtype=torch.uint8)# (N,3,256,256)
-        target_ = to_onehot.call(target).to(device=device,dtype=torch.long) # (N,256,256)
+        # target = (sample_batched['label']*255).to(device=device, dtype=torch.uint8)# (N,3,256,256)
+        target = sample_batched['label'].to(device=device)# (N,256,256)
+        # print(epoch, source.mean())
 
         optimizer.zero_grad()
         prediction = net(source) # # (N,4,256,256)
-        # print(np.unique(target_.cpu().numpy()))
-        # print("\n")
-        # print(target_.shape)
+        # if target[target!=0].size()[0]>0:
+            # np.save("./target.npy", target.cpu().numpy())
+            # np.save("./target1.npy", (sample_batched['label']*255))
+            # assert 1==0
 
-        # print("\n")
-        # print(prediction)
-        # assert 1==0
-        # loss = criterion(prediction, target_) 
-        loss =  criterion(prediction, target_)  + dice_loss(F.softmax(prediction, dim=1).float(),
-                                       F.one_hot(target_, net.n_classes).permute(0, 3, 1, 2).float(),
+        loss =  criterion(prediction, target)  + dice_loss(F.softmax(prediction, dim=1).float(),
+                                       F.one_hot(target, net.n_classes).permute(0, 3, 1, 2).float(),
                                        multiclass=True)
         loss.backward()
         optimizer.step()
         epoch_loss += loss.item()
     print(epoch, epoch_loss)
-        # print(target, target_)
-        # if target[target!=0].size()[0]>0:
-            # np.save("./target.npy", target.cpu().numpy())
-            # np.save("./target_.npy", target_.cpu().numpy())
-            # a = target.cpu().numpy()[0]
-            # b= target_.cpu().numpy()[0]
-            # mask = a[1,:,:]==221
-            # if np.any(mask):
-                # print(221,b[:,mask][:,0])
-            # mask = a[1,:,:]==255
-            # if np.any(mask):
-                # print(255,b[:,mask][:,0])
-            # mask = a[1,:,:]==50
-            # if np.any(mask):
-        
-                # print(50,b[:,mask][:,0])
-            
-            # assert 1==0
 
-            # print(epoch, i_batch, prediction[0,:,0,0], target_[target_!=0])
-        # print(i_batch, sample_batched['img'].size(),
-            #   sample_batched['label'].size(), sample_batched['img'].mean(), sample_batched['label'][sample_batched['label']!=0], prediction.shape, prediction.mean())
-        # break
-    # break
+    
+PATH = "checkpoints"+os.sep+"epoch_"+str(epoch)+"-loss_"+str(epoch_loss)+".pt"
+if sys.argv[1]=='save':
+    torch.save(net.state_dict(), PATH)

@@ -6,7 +6,38 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 from skimage import io, transform
 from PIL import Image
+import random
 
+class ColorMap(object):
+    """
+    # label:color_rgb:parts:actions
+background:0,0,0:: 0
+crop:102,255,102:: 1
+soil:51,221,255:: 2
+thistle:250,50,183:: 3
+    """
+    def __init__(self):
+        self.classes = ["background", "crop", "soil", "thistle"]
+        self.colormap = [[0,0,0], [102,255,102], [51,221,255], [250,50,183]]
+        self.cm2lbl = np.zeros(256**3)
+        for i,cm in enumerate(self.colormap):
+            self.cm2lbl[(cm[0]*256+cm[1])*256+cm[2]]=i
+    def img2label(self, im, data_type="array"):
+        if data_type=="array":
+            data = im.astype("int32")
+            idx = (data[:,:,0]*256+data[:,:,1])*256+data[:,:,2]
+            return np.array(self.cm2lbl[idx])
+        elif data_type=="tensor":
+            # print("im in ColorMap.img2label: ", im.shape)
+            # np.save("./im.npy", im.cpu().numpy())
+            # print(im.dtype, im.max())
+            im = (im.numpy().transpose((1, 2, 0))*255).astype(np.uint8) # C x H x W -> H x W x C
+            data = im.astype("int32")
+            idx = (data[:,:,0]*256+data[:,:,1])*256+data[:,:,2]
+            # data = np.array(self.cm2lbl[idx]) 
+            # print("np.unique: ", np.unique(np.array(self.cm2lbl[idx])))    
+            # assert 1==0
+            return torch.from_numpy(np.array(self.cm2lbl[idx])).long()
 class ToTensor(object):
     """Convert ndarrays in sample to Tensors."""
 
@@ -35,15 +66,23 @@ class ToTensor(object):
 #                 'label': torch.from_numpy(label)}
 
 class RandomCrop(object):
-    def __call__(self,sample):
-        img, label = sample['img'], sample['label']
+    def __init__(self, th, tw):
+        self.size = (th, tw)
+    
+    def __call__(self, *images):
+        # perform some check to make sure images are all the same size
+        # if self.padding > 0:
+            # images = [ImageOps.expand(img, border=self.padding, fill=0) for im in images]
 
-        rc = transforms.RandomCrop(256)
-        img = rc(img)
-        label = rc(label)
-        return {'img': img,
-                'label': label}
+        w, h = images[0].size
+        th, tw = self.size
+        if w == tw and h == th:
+            return images
 
+        x1 = random.randint(0, w - tw)
+        y1 = random.randint(0, h - th)
+        return [img.crop((x1, y1, x1 + tw, y1 + th)) for img in images]
+    
 class WeedCropDataset(Dataset):
 
     """Weed Crop dataset.
@@ -78,7 +117,10 @@ class WeedCropDataset(Dataset):
         self.crop = [102,255,102]# [0,1,0,0]
         self.soil = [51,221,255]# [0,0,1,0]
         self.thistle = [250,50,183]# [0,0,0,1]
-
+        
+        self.cm = ColorMap()
+        
+        self.rc = RandomCrop(512, 512)
     def __len__(self):
         return len(self.img_names)
 
@@ -104,13 +146,15 @@ class WeedCropDataset(Dataset):
         # label_onehot[mask_thistle,:]=[0,0,0,1]
 
         
-        # landmarks = self.landmarks_frame.iloc[idx, 1:]
-        # landmarks = np.array([landmarks])
-        # landmarks = landmarks.astype('float').reshape(-1, 2)
         sample = {'img': img, 'label': label, "img_name": img_name, "label_name": label_name}
 
         if self.transform:
+            sample["img"], sample["label"] = self.rc(sample["img"], sample["label"])
             sample["img"] = self.transform(sample["img"])
-            sample["label"] = self.transform(sample["label"])
-
+            sample["label"] = self.transform(sample["label"]) # torch.Size([3, 256, 256])
+            # print(sample["label"].shape)
+            sample["label"] = self.cm.img2label(sample["label"], data_type="tensor")
+            # print(sample["label"].shape)
+        # rc = RandomCrop()    
+        # sample = RandomCrop.__call__(sample)
         return sample

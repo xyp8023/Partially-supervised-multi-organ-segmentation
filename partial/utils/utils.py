@@ -15,9 +15,9 @@ thistle:250,50,183::
         self.cm2lbl = np.zeros(256**3)
         for i,cm in enumerate(self.colormap):
             self.cm2lbl[(cm[0]*256+cm[1])*256+cm[2]]=i
-    def img2label(im):
-        data = im
-        index = (data[:,:,0]*256+data[:,:,1])*256+data[:,:,2]
+    def img2label(self, im):
+        data = im.astype("int32")
+        idx = (data[:,:,0]*256+data[:,:,1])*256+data[:,:,2]
         return np.array(self.cm2lbl[idx])
 
 

@@ -4,7 +4,7 @@ from dataloading.dataloading import WeedCropDataset, ToTensor, RandomCrop
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 from unet import UNet
-from utils.dice_score import dice_loss
+from utils.dice_score import *
 from utils.utils import To_Onehot, To_Class
 
 import torch.nn as nn
@@ -16,7 +16,7 @@ import sys
 ## hyper-parameters
 learning_rate=0.002
 amp=False
-torch.manual_seed(17)
+# torch.manual_seed(17)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -25,7 +25,7 @@ train_transforms = transforms.Compose([transforms.ToTensor()])
 
 
 
-dataset = WeedCropDataset(root_dir="datasets/debug",transform=train_transforms)
+dataset = WeedCropDataset(root_dir="datasets/debug", transform=train_transforms)
 # dataset = WeedCropDataset(root_dir="datasets/val")
 N = 2 # batch_size
 dataloader = DataLoader(dataset, batch_size=N,
@@ -36,14 +36,20 @@ net.to(device=device)
 optimizer = optim.RMSprop(net.parameters(), lr=learning_rate, weight_decay=1e-8, momentum=0.9)
 # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=2)  # goal: maximize Dice score
 # grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-criterion = nn.CrossEntropyLoss()
+# criterion = nn.CrossEntropyLoss()
+# criterion = CrossentropyND()
+# dc = DiceLoss(n_classes=4, multiclass=True)
+# soft_dice_loss = SoftDiceLoss(apply_nonlin=None, batch_dice=False, do_bg=False, smooth=1.)
 
+criterion = DC_CE_Marginal_Exclusion_loss(n_classes=4, multiclass=True)
 
 
 # model = TheModelClass(*args, **kwargs)
 # model.load_state_dict(torch.load(PATH))
 # model.eval()
-num_epochs = 200
+debug=True
+num_epochs= 2 if debug else 100
+    
 for epoch in range(num_epochs):
     epoch_loss = 0.0
     for i_batch, sample_batched in enumerate(dataloader):
@@ -59,9 +65,12 @@ for epoch in range(num_epochs):
             # np.save("./target1.npy", (sample_batched['label']*255))
             # assert 1==0
 
-        loss =  criterion(prediction, target)  + dice_loss(F.softmax(prediction, dim=1).float(),
-                                       F.one_hot(target, net.n_classes).permute(0, 3, 1, 2).float(),
-                                       multiclass=True)
+        # loss =  criterion(prediction, target)  + dice_loss(F.softmax(prediction, dim=1).float(),
+                                       # F.one_hot(target, net.n_classes).permute(0, 3, 1, 2).float(),
+                                       # multiclass=True)
+        # loss = criterion(prediction, target) + dc(prediction, target)
+        loss = criterion(prediction, target, default_task=["b", "c", "s", "w"], cur_task=["b", "c", "s", "w"]) + criterion(prediction, target, default_task=["b", "c", "s", "w"], cur_task=["s"])
+        
         loss.backward()
         optimizer.step()
         epoch_loss += loss.item()

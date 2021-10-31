@@ -7,7 +7,7 @@ import torch.nn.functional as F
 # TODO
 # Implement Marginal Loss
 
-def dice_coeff(input: Tensor, target: Tensor, reduce_batch_first: bool = False, epsilon=1e-6):
+def dice_coeff(input: Tensor, target: Tensor, reduce_batch_first: bool = False, epsilon=1e-6, ignore_channel=None):
     # Average of Dice coefficient for all batches, or for a single mask
     assert input.size() == target.size()
     if input.dim() == 2 and reduce_batch_first:
@@ -54,8 +54,10 @@ class DiceLoss(torch.nn.Module):
         super(DiceLoss, self).__init__()
         self.n_classes = n_classes
         self.multiclass = multiclass
-         
+        # print("self.n_classes self.multiclass: ",  self.n_classes, self.multiclass)
     def forward(self, prediction, target, ignore_channel=None):
+        print("self.n_classes self.multiclass: ",  self.n_classes, self.multiclass, torch.unique(target))
+        
         return dice_loss(F.softmax(prediction, dim=1).float(),
                                        F.one_hot(target, self.n_classes).permute(0, 3, 1, 2).float(),
                                        multiclass=self.multiclass, ignore_channel=ignore_channel)
@@ -74,12 +76,9 @@ def merged_onehot_transform(tensor, depth=4, data_type="float", new_n_classes=2,
     onehot = F.one_hot(tensor, depth).permute(0, 3, 1, 2) # (bs, c, h, w), c=depth
     bs,c,h,w = onehot.shape
     onehot = onehot.permute(1, 0, 2, 3)# (bs, c, h, w)->( c, bs, h, w)
-
-    
-    
     # (new_n_classes, bs, h, w)
     merged_onehot = torch.zeros((new_n_classes, bs, h ,w))
-    mask = onehot[2]==1 # 0010 -> 01; others 10
+    mask = onehot[index]==1 # 0010 -> 01; others 10
     merged_onehot[1, mask]=1
     merged_onehot[0, ~mask]=1
     merged_onehot = merged_onehot.permute(1, 0, 2, 3) # -> (new_n_classes, bs, h, w)->(bs, new_n_classes, h, w)
@@ -90,6 +89,64 @@ def merged_onehot_transform(tensor, depth=4, data_type="float", new_n_classes=2,
     else:
         raise NotImplementedError("nah son")
     
+### seems to have a bug when target has 0,1,2,3
+def expand_gt_squeezed(net_output, tensor, cur_task, default_task, depth=4, index=2, new_n_classes=2):
+    assert index==2
+    assert new_n_classes==2
+    assert depth==4
+    target_onehot = F.one_hot(tensor, depth).permute(0, 3, 1, 2) # (bs, c, h, w), c=depth
+    
+    target_onehot = target_onehot.permute(1, 0, 2, 3)# (bs, c, h, w)->( c, bs, h, w)
+
+    target_onehot = target_onehot.view(depth, -1)# ->( c, bsxhxw)
+    
+    new_gt = torch.zeros((new_n_classes, target_onehot.shape[1]))
+    if net_output.device.type == "cuda":
+        new_gt = new_gt.cuda(net_output.device.index)
+    mask = target_onehot[index]==1
+    
+    for i, task in enumerate(default_task):
+        
+        if task in cur_task: 
+            # print(i,task, "cur_task")
+            j = cur_task.index(task) # i=2, j=0
+            
+            new_gt[1, mask]+=target_onehot[i, mask]
+        else:
+            # print(i,task, "not cur_task")
+            
+            new_gt[0, ~mask]+=target_onehot[i, ~mask]
+    
+    return new_gt
+
+def merge_prediction_squeezed(net_output, target_onehot, cur_task, default_task, depth=4, index=2, new_n_classes=2):
+    assert index==2
+    assert new_n_classes==2
+    assert depth==4
+    # target_onehot (new_n_classes, -1)
+    # net_output (bs, c, h, w)
+    net_output = net_output.permute(1, 0, 2, 3)# (bs, c, h, w)->( c, bs, h, w)
+    # print(net_output.shape)
+    net_output = net_output.contiguous().view(depth, -1)# ->( c, bsxhxw)
+    net_output_onehot = F.softmax(net_output, dim=0)#( c, bsxhxw)
+    new_prediction = torch.zeros((new_n_classes, target_onehot.shape[1]))
+    if net_output.device.type == "cuda":
+        new_prediction = new_prediction.cuda(net_output.device.index)
+    mask = torch.argmax(net_output_onehot,dim=0)==index #( bsxhxw)
+    
+    for i, task in enumerate(default_task):
+        
+        if task in cur_task: 
+            # print(i,task, "cur_task")
+            j = cur_task.index(task) # i=2, j=0
+            
+            new_prediction[1, mask]+=net_output[i, mask]
+        else:
+            # print(i,task, "not cur_task")
+            
+            new_prediction[0, ~mask]+=net_output[i, ~mask]
+    
+    return new_prediction
 
 def merged_squeezed_onehot_transform(tensor, depth=4, data_type="float", new_n_classes=2, index=2):
     assert new_n_classes==2
@@ -110,7 +167,7 @@ def merged_squeezed_onehot_transform(tensor, depth=4, data_type="float", new_n_c
     
     if data_type=="float":
         
-        return merged_onehot.float()
+        return merged_onehot.float() # (new_n_classes, bsxhxw)
     else:
         raise NotImplementedError("nah son")
     
@@ -165,56 +222,28 @@ class CrossentropyND(torch.nn.CrossEntropyLoss):
             
 
 
-# to do debug
-def merge_prediction_new_view(net_output, target_onehot, cur_task, default_task):
-    '''
-        cur_task: GT task
-        default_task: net_output task
-    '''
-    new_prediction = torch.zeros_like(target_onehot)
-    if net_output.device.type == "cuda":
-        new_prediction = new_prediction.cuda(net_output.device.index)
-    new_prediction[:, 0, :, :] = net_output[:, 0, :, :]#先把bkg赋值(bkg不属于任何task)
-  
-
-    for i, task in enumerate(default_task):
-        if task in cur_task: 
-            j = cur_task.index(task)
-            new_prediction[:, j+1, :, :] += net_output[:, i, :, :]
-        else:
-            new_prediction[:, 0, :, :] += net_output[:, i, :, :]
-    return new_prediction
-
-
-def expand_gt_new_view(net_output, target_onehot, cur_task, default_task):
-    # net_output (bs, ori_n_classes, H, W)
-    # target_onehot (bs, new_n_classes, H, W)
-    
-    new_gt = torch.zeros_like(net_output)
-    if net_output.device.type == "cuda":
-        new_gt = new_gt.cuda(net_output.device.index)
-    new_gt[:, 0, :, :] = 1-target_onehot[:, 0, :, :]
-    for i, task in enumerate(default_task):
-        if task in cur_task:
-            j = cur_task.index(task)
-            new_gt[:, i, :, :] = 1-target_onehot[:, j+1, :, :]
-        else:
-            new_gt[:, i, :, :] = 1-target_onehot[:, 0, :, :]
-    return new_gt
 
 
 
 class DC_CE_Marginal_Exclusion_loss(nn.Module):
-    def __init__(self, n_classes=4, multiclass=True, aggregate="sum", ex=False):
+    def __init__(self, n_classes=4, multiclass=True, aggregate="sum", ex=False, new_n_classes=2, index=2, h=512,w=512):
         super(DC_CE_Marginal_Exclusion_loss, self).__init__()
         self.aggregate = aggregate
         self.n_classes = n_classes
+        self.ex_choice = ex
+        
+        self.new_n_classes=new_n_classes
+        self.index=index
+        self.h=h
+        self.w=w
         
         self.ce = CrossentropyND()
         self.dc = DiceLoss(n_classes=self.n_classes, multiclass=multiclass)
+        self.dc_m = DiceLoss(n_classes=self.new_n_classes, multiclass=False)
+        
         # self.ex = Exclusion_loss(self.dc)
         # self.ex_CE = Exclusion_loss(self.ce)
-        self.ex_choice = ex
+
         print(f"mode:{aggregate}/ weight:[1:1] with exclusion:{ex}")
 
     def forward(self, net_output, target, default_task, cur_task):
@@ -242,34 +271,72 @@ class DC_CE_Marginal_Exclusion_loss(nn.Module):
     
         else:
             
-            print(f"not_equal:{cur_task}/{default_task}")
-            target_onehot = merged_onehot_transform(target)
-            # target_onehot = onehot_transform(target, self.n_classes, data_type="float") # (bs, H, W) -> (bs, self.n_classes, H, W)
+            # print(f"not_equal:{cur_task}/{default_task}")
+            # target_onehot = merged_onehot_transform(target)
+            assert torch.unique(target.long()).size()[0]<=4
+            target_onehot_merged_squeezed = merged_squeezed_onehot_transform(target, depth=self.n_classes, data_type="float", new_n_classes=self.new_n_classes, index=self.index) #(new_n_classes, bsxhxw)
             
+            # target_onehot_merged_squeezed = expand_gt_squeezed(net_output, target, cur_task, default_task, depth=self.n_classes, index=self.index, new_n_classes=self.new_n_classes) #(2,-1)
+            merged_pre = merge_prediction_squeezed(net_output, target_onehot_merged_squeezed, cur_task, default_task, depth=self.n_classes, index=self.index, new_n_classes=self.new_n_classes)#(2,-1)
+            # target_onehot = onehot_transform(target, self.n_classes, data_type="float") # (bs, H, W) -> (bs, self.n_classes, H, W)
+            target_onehot_merged_squeezed = target_onehot_merged_squeezed.view(-1,merged_pre.shape[0],self.h, self.w)
+            merged_pre = merged_pre.view(-1,merged_pre.shape[0],self.h,self.w)
+            target_merged_squeezed = torch.argmax(target_onehot_merged_squeezed, axis=0)
+            if torch.unique(target_merged_squeezed).size()[0]>self.new_n_classes:
+                print("error: saving for debugging")
+                import numpy as np
+                np.save("./target_before_onehot.npy", target.cpu().numpy())
+                np.save("./target_onehot_merged_squeezed.npy", target_onehot_merged_squeezed.cpu().numpy())
+                np.save("./merged_pre.npy", merged_pre.detach().cpu().numpy())
+                np.save("./target_merged_squeezed.npy", target_merged_squeezed.cpu().numpy())
+                print("torch.unique(target_merged_squeezed) ", torch.unique(target_merged_squeezed))
+                
+            assert torch.unique(target_merged_squeezed).size()[0]<self.new_n_classes+1
+            dc_loss_m = self.dc_m(merged_pre, target_merged_squeezed)
+            ce_loss_m = self.ce(merged_pre, target_merged_squeezed)
+            if self.aggregate == "sum":
+                result = ce_loss_m + dc_loss_m
+            elif self.aggregate == "ce":
+                result = ce_loss_m
+            elif self.aggregate == "dc":
+                result = dc_loss_m
+            else:
+                # reserved for other stuff (later?)
+                raise NotImplementedError("nah son")
+
+        return result
             # target_onehot1 = onehot_transform(target, self.n_classes, data_type="float", squeeze=True) # (bs, H, W) -> (bs, self.n_classesxHxW)
             
-            print("target_onehot, target, net_output ", target_onehot.shape, target.shape, net_output.shape) # torch.Size([2, 4, 512]), torch.Size([2, 512, 512]), torch.Size([2, 4, 512, 512])
+            # print("target_onehot, target, net_output ", target_onehot.shape, target.shape, net_output.shape) # torch.Size([2, 4, 512]), torch.Size([2, 512, 512]), torch.Size([2, 4, 512, 512])
             
             # print("target_onehot1.shape ",target_onehot1.shape)
-            import numpy as np
-            np.save("./target_before_onehot.npy", target.cpu().numpy())
-            np.save("./target_after_onehot.npy", target_onehot.cpu().numpy())
-            # np.save("./target_after_onehot1.npy", target_onehot1.cpu().numpy())
-            not_gt = expand_gt_new_view(net_output, target_onehot,
-                               cur_task, default_task) # (bs,c,h,w) merged
+            # import numpy as np
+            # np.save("./target_before_onehot.npy", target.cpu().numpy())
+            # np.save("./target_onehot_merged_squeezed.npy", target_onehot_merged_squeezed.cpu().numpy())
+            # np.save("./target_onehot_merged_squeezed1.npy", target_onehot_merged_squeezed1.cpu().numpy())
+            
+            # np.save("./target_onehot_ori.npy", target_onehot_ori.cpu().numpy())
+            # not_gt = expand_gt_new_view(net_output, target_onehot,
+                               # cur_task, default_task) # (bs,c,h,w) merged
             
             # TO DO DEBUG
-            merged_pre = merge_prediction_new_view(
-                net_output, target_onehot, cur_task, default_task)
+            # merged_pre = merge_prediction_new_view(
+                # net_output, target_onehot, cur_task, default_task)
+            # merged_pre = merge_prediction_new_view(
+                # target_onehot_ori, target_onehot, cur_task, default_task)
+            
+            
             # print("not_gt.shape ",not_gt.shape)
-            np.save("./not_gt.npy", not_gt.cpu().numpy())
-            np.save("./merged_pre.npy", not_gt.cpu().numpy())
-            np.save("./net_output.npy", net_output.detach().cpu().numpy())
+            # np.save("./not_gt.npy", not_gt.cpu().numpy())
+            # np.save("./merged_pre.npy", merged_pre.detach().cpu().numpy())
+            # np.save("./net_output.npy", net_output.detach().cpu().numpy())
+            # np.save("./net_output.npy", target_onehot_ori.cpu().numpy())
+            
             
             
             # merged_pre = merge_prediction(
                 # net_output, target_onehot1, cur_task, default_task)
-            assert 1==0
+            # assert 1==0
 #             merged_pre = merge_prediction(
 #                 net_output, target_onehot, cur_task, default_task)
 #             not_gt = expand_gt(net_output, target_onehot,
@@ -291,4 +358,4 @@ class DC_CE_Marginal_Exclusion_loss(nn.Module):
 #             if self.ex_choice:
 #                 result = result+2*ex_loss
 #                 # result = ex_loss
-        return result
+        # return result

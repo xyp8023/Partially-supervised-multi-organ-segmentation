@@ -25,7 +25,7 @@ train_transforms = transforms.Compose([transforms.ToTensor()])
 
 
 
-dataset = WeedCropDataset(root_dir="datasets/debug", transform=train_transforms)
+dataset = WeedCropDataset(root_dir="datasets/debug", transform=train_transforms, img_file="img_name.txt", label_file="label_name.txt")
 # dataset = WeedCropDataset(root_dir="datasets/val")
 N = 2 # batch_size
 dataloader = DataLoader(dataset, batch_size=N,
@@ -47,8 +47,8 @@ criterion = DC_CE_Marginal_Exclusion_loss(n_classes=4, multiclass=True)
 # model = TheModelClass(*args, **kwargs)
 # model.load_state_dict(torch.load(PATH))
 # model.eval()
-debug=True
-num_epochs= 2 if debug else 100
+debug=False
+num_epochs= 2 if debug else 2001
     
 for epoch in range(num_epochs):
     epoch_loss = 0.0

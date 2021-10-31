@@ -95,15 +95,15 @@ class WeedCropDataset(Dataset):
 
     """
 
-    def __init__(self, root_dir, transform=ToTensor()):
+    def __init__(self, root_dir, transform=ToTensor(),th=512,tw=512, img_file="img_name1.txt", label_file="label_name1.txt"):
         """
         Args:
             root_dir (string): Directory with all the images.
             transform (callable, optional): Optional transform to be applied
                 on a sample.
         """
-        img_csv_file = root_dir + os.sep + "img_name.txt"
-        label_csv_file = root_dir + os.sep + "label_name.txt"
+        img_csv_file = root_dir + os.sep + img_file
+        label_csv_file = root_dir + os.sep + label_file
 
         with open(img_csv_file) as the_file:
             self.img_names = the_file.readlines()
@@ -120,7 +120,7 @@ class WeedCropDataset(Dataset):
         
         self.cm = ColorMap()
         
-        self.rc = RandomCrop(512, 512)
+        self.rc = RandomCrop(th, tw)
     def __len__(self):
         return len(self.img_names)
 

@@ -35,20 +35,20 @@ for i, img_name in enumerate(files):
     # print(label.shape)
     # break
     if i in trainingIdx:
-        with open('../datasets/train/img_name.txt', 'a') as the_file:
+        with open('../datasets/train/img_name1.txt', 'a') as the_file:
             the_file.write(img_name+"\n")
-        with open('../datasets/train/label_name.txt', 'a') as the_file_:
+        with open('../datasets/train/label_name1.txt', 'a') as the_file_:
             the_file_.write(label_name+"\n")
             
     if i in valIdx:
-        with open('../datasets/val/img_name.txt', 'a') as the_file:
+        with open('../datasets/val/img_name1.txt', 'a') as the_file:
             the_file.write(img_name+"\n")
-        with open('../datasets/val/label_name.txt', 'a') as the_file_:
+        with open('../datasets/val/label_name1.txt', 'a') as the_file_:
             the_file_.write(label_name+"\n")
             
     if i in testIdx:
-        with open('../datasets/test/img_name.txt', 'a') as the_file:
+        with open('../datasets/test/img_name1.txt', 'a') as the_file:
             the_file.write(img_name+"\n")
-        with open('../datasets/test/label_name.txt', 'a') as the_file_:
+        with open('../datasets/test/label_name1.txt', 'a') as the_file_:
             the_file_.write(label_name+"\n")
             
